@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教師教學輔助工具</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .perspective-1000 {
+            perspective: 1000px;
+        }
+        .transform-style-preserve-3d {
+            transform-style: preserve-3d;
+        }
+        .backface-hidden {
+            backface-visibility: hidden;
+        }
+        .rotate-y-180 {
+            transform: rotateY(180deg);
+        }
+        .custom-loader {
+            border-top-color: #3b82f6;
+            -webkit-animation: spinner 1s linear infinite;
+            animation: spinner 1s linear infinite;
+        }
+        @-webkit-keyframes spinner {
+            0% {
+                -webkit-transform: rotate(0deg);
+            }
+            100% {
+                -webkit-transform: rotate(360deg);
+            }
+        }
+        @keyframes spinner {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="app-root" class="min-h-screen p-4 sm:p-6 lg:p-8 font-sans">
+        <!-- Application content will be rendered here -->
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Expose Firebase modules to the global scope for the main script
+        window.Firebase = {
+            initializeApp,
+            getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
+            getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs
+        };
+    </script>
+    
+    <!-- QRCode.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <script type="text/javascript">
+        // Global variables provided by the Canvas environment or with fallbacks
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Helper function to generate a unique ID
+        const generateUniqueId = () => 'id-' + Math.random().toString(36).substr(2, 9);
+
+        // Helper function to show a custom modal message
+        const showMessage = (message) => {
+            const modalHtml = `
+                <div class="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50">
+                    <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full text-center">
+                        <p class="text-lg font-semibold text-gray-800 mb-4">${message}</p>
+                        <button onclick="document.querySelector('.fixed.inset-0').remove()" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-300">確定</button>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        };
+        
+        // Helper function to get the base URL of the current artifact
+        const getArtifactBaseUrl = () => {
+            // This attempts to get the base URL of the current artifact
+            const url = window.location.href;
+            const urlObj = new URL(url);
+            let baseUrl = urlObj.protocol + '//' + urlObj.host + urlObj.pathname;
+            // Remove trailing slash if present, for consistency
+            if (baseUrl.endsWith('/')) {
+                baseUrl = baseUrl.slice(0, -1);
+            }
+            return baseUrl;
+        };
+
+        // Firebase Initialization and Authentication
+        let db, auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        const initializeFirebase = async () => {
+            const { initializeApp, getFirestore, getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } = window.Firebase;
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            return new Promise((resolve) => {
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                    } else {
+                        try {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                            userId = auth.currentUser?.uid || crypto.randomUUID();
+                        } catch (error) {
+                            console.error("Firebase authentication failed:", error);
+                            showMessage(`Firebase 認證失敗: ${error.message}`);
+                            userId = crypto.randomUUID();
+                        }
+                    }
+                    isAuthReady = true;
+                    resolve();
+                });
+            });
+        };
+
+        // --- View components as functions that return HTML strings ---
+        const LessonPlanDisplay = (content) => `
+            <div class="p-6 bg-white rounded-lg shadow-md mb-6">
+                <h2 class="text-2xl font-bold mb-4 text-gray-800">課程教學教案教學計劃</h2>
+                <div class="whitespace-pre-wrap text-gray-700 leading-relaxed">${content}</div>
+            </div>
+        `;
+
+        const PPTOutlineDisplay = (content) => `
+            <div class="p-6 bg-white rounded-lg shadow-md mb-6">
+                <h2 class="text-2xl font-bold mb-4 text-gray-800">PPT簡報內容與大綱</h2>
+                <div class="whitespace-pre-wrap text-gray-700 leading-relaxed">${content}</div>
+            </div>
+        `;
+
+        const ContentSummaryDisplay = (content) => `
+            <div class="p-6 bg-white rounded-lg shadow-md mb-6">
+                <h2 class="text-2xl font-bold mb-4 text-gray-800">內容摘要</h2>
+                <div class="whitespace-pre-wrap text-gray-700 leading-relaxed">${content}</div>
+            </div>
+        `;
+
+        const KeyTermsDisplay = (content) => {
+            if (!content || content.length === 0) return `<div class="text-center text-gray-600">沒有找到關鍵詞彙。</div>`;
+            const listItems = content.map(item => `
+                <li class="mb-2">
+                    <span class="font-semibold text-gray-800">${item.term}</span>: ${item.definition}
+                </li>
+            `).join('');
+            return `
+                <div class="p-6 bg-white rounded-lg shadow-md mb-6">
+                    <h2 class="text-2xl font-bold mb-4 text-gray-800">關鍵字詞解釋</h2>
+                    <ul class="list-disc list-inside text-gray-700 leading-relaxed">${listItems}</ul>
+                </div>
+            `;
+        };
+
+        const DiscussionQuestionsDisplay = (content) => `
+            <div class="p-6 bg-white rounded-lg shadow-md mb-6">
+                <h2 class="text-2xl font-bold mb-4 text-gray-800">延伸討論問題</h2>
+                <div class="whitespace-pre-wrap text-gray-700 leading-relaxed">${content}</div>
+            </div>
+        `;
+
+        const FlashcardDisplay = (cards, isStudentView, studentName, contentId) => {
+            let currentCardIndex = 0;
+            let isFlipped = false;
+            let showMatchGame = false;
+            let matchedPairs = [];
+            let selectedCards = [];
+            
+            const renderCard = () => {
+                const cardFront = cards[currentCardIndex].chinese;
+                const cardBack = cards[currentCardIndex].english;
+                return `
+                    <div class="relative w-full h-64 perspective-1000 mb-6">
+                        <div id="flashcard-inner" class="relative w-full h-full transform-style-preserve-3d transition-transform duration-700 ${isFlipped ? 'rotate-y-180' : ''}" style="cursor: pointer;">
+                            <div class="absolute w-full h-full backface-hidden bg-blue-500 text-white rounded-lg flex items-center justify-center text-4xl font-bold shadow-lg p-4">
+                                ${cardFront}
+                            </div>
+                            <div class="absolute w-full h-full backface-hidden bg-green-500 text-white rounded-lg flex items-center justify-center text-4xl font-bold shadow-lg p-4 rotate-y-180">
+                                ${cardBack}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            };
+
+            const renderButtons = () => `
+                <div class="flex justify-center space-x-4 mb-6">
+                    <button id="prev-card" class="px-6 py-3 bg-gray-600 text-white rounded-lg shadow-lg hover:bg-gray-700 transition duration-300 ease-in-out transform hover:scale-105">
+                        上一張
+                    </button>
+                    <button id="next-card" class="px-6 py-3 bg-gray-600 text-white rounded-lg shadow-lg hover:bg-gray-700 transition duration-300 ease-in-out transform hover:scale-105">
+                        下一張
+                    </button>
+                </div>
+                ${!isStudentView ? `
+                <button id="start-game" class="w-full px-6 py-3 bg-purple-600 text-white rounded-lg shadow-lg hover:bg-purple-700 transition duration-300 ease-in-out transform hover:scale-105">
+                    開始配對遊戲
+                </button>
+                ` : ''}
+            `;
+
+            const renderGame = () => {
+                const gameCards = [...cards, ...cards].map((card, index) => ({
+                    ...card,
+                    id: `${card.chinese}-${card.english}-${index}`,
+                    isEnglish: index >= cards.length
+                })).sort(() => Math.random() - 0.5);
+
+                const cardHtml = gameCards.map(card => `
+                    <div id="${card.id}" class="h-32 flex items-center justify-center rounded-lg shadow-md cursor-pointer bg-blue-400 text-white text-lg font-bold text-center p-2
+                        transition-all duration-300 ease-in-out transform hover:scale-105 hover:shadow-lg"
+                        data-chinese="${card.chinese}" data-english="${card.english}" data-is-english="${card.isEnglish}"
+                    >
+                        ${card.isEnglish ? card.english : card.chinese}
+                    </div>
+                `).join('');
+
+                const backButton = `
+                    <button id="back-to-cards" class="col-span-full mt-6 px-6 py-3 bg-gray-600 text-white rounded-lg shadow-lg hover:bg-gray-700 transition duration-300 ease-in-out transform hover:scale-105">
+                        返回字卡瀏覽
+                    </button>
+                `;
+
+                return `
+                    <div id="game-grid" class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                        ${cardHtml}
+                        ${backButton}
+                    </div>
+                `;
+            };
+
+            const fullHtml = `
+                <div class="p-6 bg-white rounded-lg shadow-md mb-6">
+                    <h2 class="text-2xl font-bold mb-4 text-gray-800">Flash字卡</h2>
+                    <div id="flashcard-container">
+                        ${renderCard()}
+                        ${renderButtons()}
+                    </div>
+                </div>
+            `;
+
+            const handleCardEvents = () => {
+                const container = document.getElementById('flashcard-container');
+                if (!container) return;
+
+                const updateDisplay = () => {
+                    container.innerHTML = showMatchGame ? renderGame() : renderCard() + renderButtons();
+                    setupCardEventListeners();
+                };
+
+                const setupCardEventListeners = () => {
+                    const innerCard = document.getElementById('flashcard-inner');
+                    if (innerCard) {
+                        innerCard.addEventListener('click', () => {
+                            isFlipped = !isFlipped;
+                            updateDisplay();
+                        });
+                    }
+
+                    const nextButton = document.getElementById('next-card');
+                    if (nextButton) {
+                        nextButton.addEventListener('click', () => {
+                            isFlipped = false;
+                            currentCardIndex = (currentCardIndex + 1) % cards.length;
+                            updateDisplay();
+                        });
+                    }
+
+                    const prevButton = document.getElementById('prev-card');
+                    if (prevButton) {
+                        prevButton.addEventListener('click', () => {
+                            isFlipped = false;
+                            currentCardIndex = (currentCardIndex - 1 + cards.length) % cards.length;
+                            updateDisplay();
+                        });
+                    }
+
+                    const startGameButton = document.getElementById('start-game');
+                    if (startGameButton) {
+                        startGameButton.addEventListener('click', () => {
+                            showMatchGame = true;
+                            matchedPairs = [];
+                            selectedCards = [];
+                            updateDisplay();
+                        });
+                    }
+
+                    const backToCardsButton = document.getElementById('back-to-cards');
+                    if (backToCardsButton) {
+                        backToCardsButton.addEventListener('click', () => {
+                            showMatchGame = false;
+                            updateDisplay();
+                        });
+                    }
+
+                    const gameGrid = document.getElementById('game-grid');
+                    if (gameGrid) {
+                        gameGrid.querySelectorAll('div').forEach(cardEl => {
+                            cardEl.addEventListener('click', () => {
+                                if (cardEl.classList.contains('bg-gray-300') || selectedCards.includes(cardEl)) return;
+
+                                cardEl.classList.remove('bg-blue-400');
+                                cardEl.classList.add('bg-yellow-400');
+                                
+                                selectedCards.push(cardEl);
+
+                                if (selectedCards.length === 2) {
+                                    const [card1, card2] = selectedCards;
+                                    const isMatch = (card1.dataset.chinese === card2.dataset.chinese && card1.dataset.english === card2.dataset.english) && card1.id !== card2.id;
+                                    
+                                    if (isMatch) {
+                                        card1.classList.remove('bg-yellow-400');
+                                        card1.classList.add('bg-gray-300', 'opacity-50');
+                                        card2.classList.remove('bg-yellow-400');
+                                        card2.classList.add('bg-gray-300', 'opacity-50');
+                                        
+                                        matchedPairs.push(card1.id, card2.id);
+                                        selectedCards = [];
+
+                                        if (matchedPairs.length === cards.length * 2) {
+                                            const messageHtml = `
+                                                <div class="col-span-full text-center mt-6 text-2xl font-bold text-green-700">
+                                                    恭喜！你完成了配對遊戲！
+                                                </div>
+                                            `;
+                                            gameGrid.insertAdjacentHTML('beforeend', messageHtml);
+                                        }
+                                    } else {
+                                        setTimeout(() => {
+                                            card1.classList.remove('bg-yellow-400');
+                                            card1.classList.add('bg-blue-400');
+                                            card2.classList.remove('bg-yellow-400');
+                                            card2.classList.add('bg-blue-400');
+                                            selectedCards = [];
+                                        }, 1000);
+                                    }
+                                }
+                            });
+                        });
+                    }
+                };
+
+                updateDisplay(); // Initial render
+            };
+
+            return { html: fullHtml, setup: handleCardEvents };
+        };
+
+        const QuizDisplay = (quizData, quizId, isStudentView, studentName, contentId, showMessage) => {
+            let studentAnswers = {};
+            let submitted = false;
+            let score = 0;
+            
+            const renderQuiz = () => {
+                const questionHtml = quizData.map((q, index) => {
+                    let inputHtml;
+                    if (q.type === 'boolean') {
+                        inputHtml = `
+                            <div class="flex items-center space-x-4">
+                                <label class="inline-flex items-center">
+                                    <input type="radio" name="q${index}" value="true" class="form-radio text-blue-600" ${submitted ? 'disabled' : ''} ${studentAnswers[index] === 'true' ? 'checked' : ''}>
+                                    <span class="ml-2 text-gray-700">是</span>
+                                </label>
+                                <label class="inline-flex items-center">
+                                    <input type="radio" name="q${index}" value="false" class="form-radio text-blue-600" ${submitted ? 'disabled' : ''} ${studentAnswers[index] === 'false' ? 'checked' : ''}>
+                                    <span class="ml-2 text-gray-700">否</span>
+                                </label>
+                            </div>
+                        `;
+                    } else if (q.type === 'multiple_choice') {
+                        inputHtml = `<div class="space-y-2">` + q.options.map((option, optIndex) => `
+                            <label class="inline-flex items-center w-full">
+                                <input type="radio" name="q${index}" value="${option}" class="form-radio text-blue-600" ${submitted ? 'disabled' : ''} ${studentAnswers[index] === option ? 'checked' : ''}>
+                                <span class="ml-2 text-gray-700">${option}</span>
+                            </label>
+                        `).join('') + `</div>`;
+                    } else if (q.type === 'text') {
+                        inputHtml = `
+                            <input type="text" name="q${index}" class="mt-2 block w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500" placeholder="請輸入答案" value="${studentAnswers[index] || ''}" ${submitted ? 'disabled' : ''}>
+                        `;
+                    }
+                    
+                    const resultMessage = submitted ? `
+                        <p class="mt-2 text-sm font-medium ${String(studentAnswers[index]).trim().toLowerCase() === String(q.answer).trim().toLowerCase() ? 'text-green-600' : 'text-red-600'}">
+                            正確答案: ${q.answer}
+                        </p>
+                    ` : '';
+
+                    return `
+                        <div class="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                            <p class="text-lg font-semibold mb-2 text-gray-800">Q${index + 1}: ${q.question}</p>
+                            ${inputHtml}
+                            ${resultMessage}
+                        </div>
+                    `;
+                }).join('');
+
+                const submitButton = !submitted ? `
+                    <button id="submit-quiz" type="button" class="mt-4 px-6 py-3 bg-green-600 text-white rounded-lg shadow-lg hover:bg-green-700 transition duration-300 ease-in-out transform hover:scale-105">
+                        提交測驗
+                    </button>
+                ` : `
+                    <div class="mt-4 p-4 bg-blue-100 border border-blue-300 rounded-lg text-blue-800">
+                        <p class="text-xl font-bold">你的分數: ${score} / ${quizData.length}</p>
+                    </div>
+                `;
+
+                return `
+                    <div class="p-6 bg-white rounded-lg shadow-md mb-6">
+                        <h2 class="text-2xl font-bold mb-4 text-gray-800">測驗</h2>
+                        ${isStudentView ? `<p class="text-gray-600 mb-4">測驗ID: <span class="font-mono text-blue-700">${quizId}</span></p>` : ''}
+                        <form id="quiz-form" onsubmit="event.preventDefault()">
+                            ${questionHtml}
+                            ${submitButton}
+                        </form>
+                    </div>
+                `;
+            };
+            
+            const handleQuizEvents = () => {
+                const quizForm = document.getElementById('quiz-form');
+                if (!quizForm) return;
+
+                quizForm.addEventListener('change', (e) => {
+                    const input = e.target;
+                    const questionIndex = parseInt(input.name.replace('q', ''));
+                    studentAnswers[questionIndex] = input.value;
+                });
+
+                const submitButton = document.getElementById('submit-quiz');
+                if (submitButton) {
+                    submitButton.addEventListener('click', async () => {
+                        if (!userId) {
+                            showMessage('無法提交測驗，用戶ID未準備好。');
+                            return;
+                        }
+                        if (!studentName && isStudentView) {
+                            showMessage('請輸入您的姓名才能提交測驗。');
+                            return;
+                        }
+
+                        let correctCount = 0;
+                        const answersToStore = {};
+                        quizData.forEach((q, index) => {
+                            const studentAns = studentAnswers[index] ? String(studentAnswers[index]).trim().toLowerCase() : '';
+                            const correctAns = String(q.answer).trim().toLowerCase();
+                            if (studentAns === correctAns) {
+                                correctCount++;
+                            }
+                            answersToStore[index] = {
+                                question: q.question,
+                                studentAnswer: studentAnswers[index] || '',
+                                correctAnswer: q.answer,
+                                isCorrect: studentAns === correctAns
+                            };
+                        });
+
+                        score = correctCount;
+                        submitted = true;
+
+                        try {
+                            const { doc, setDoc } = window.Firebase;
+                            const responseDocRef = doc(db, `artifacts/${appId}/public/data/generatedContent/${contentId}/quizResponses`, userId);
+                            await setDoc(responseDocRef, {
+                                quizId: contentId,
+                                studentSessionId: userId,
+                                studentName: studentName || `匿名學生 ${userId.substring(0, 8)}`,
+                                answers: answersToStore,
+                                score: correctCount,
+                                totalQuestions: quizData.length,
+                                submittedAt: new Date()
+                            });
+                            showMessage('測驗已提交！');
+                        } catch (error) {
+                            console.error("Error submitting quiz:", error);
+                            showMessage(`提交測驗時發生錯誤: ${error.message}`);
+                        }
+
+                        renderApp();
+                    });
+                }
+            };
+            
+            return { html: renderQuiz(), setup: handleQuizEvents };
+        };
+
+        const TeacherView = (contentId, showMessage) => {
+            let studentRecords = [];
+            let loadingRecords = true;
+
+            const renderRecords = () => {
+                if (loadingRecords) {
+                    return `<div class="text-center text-gray-600 mt-4">載入學生紀錄中...</div>`;
+                }
+
+                const recordsHtml = studentRecords.map(record => `
+                    <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+                        <p class="font-medium text-gray-700">學生: ${record.studentName} (ID: ${record.studentSessionId.substring(0, 8)}...)</p>
+                        <p class="text-gray-600">分數: ${record.score} / ${record.totalQuestions}</p>
+                        <p class="text-gray-600 text-sm">提交時間: ${record.submittedAt?.toDate().toLocaleString()}</p>
+                        <div class="mt-2 text-sm">
+                            ${Object.values(record.answers).map((ans, idx) => `
+                                <div class="mb-1 ${ans.isCorrect ? 'text-green-700' : 'text-red-700'}">
+                                    <p>Q${idx + 1}: ${ans.question}</p>
+                                    <p>你的答案: ${ans.studentAnswer}</p>
+                                    <p>正確答案: ${ans.correctAnswer}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('');
+
+                return `
+                    <div class="mt-8 p-4 bg-gray-50 rounded-lg shadow-inner">
+                        <h3 class="text-xl font-semibold mb-4 text-gray-800">學生作答紀錄 (測驗ID: ${contentId})</h3>
+                        <p class="text-sm text-gray-600 mb-4">您的用戶ID: <span class="font-mono text-blue-700">${userId}</span></p>
+                        ${studentRecords.length === 0 ? '<p class="text-gray-600">目前沒有學生作答紀錄。</p>' : `<div class="space-y-4">${recordsHtml}</div>`}
+                    </div>
+                `;
+            };
+
+            const setupRecordsListener = () => {
+                if (!db || !contentId || !isAuthReady) return;
+
+                const { collection, onSnapshot } = window.Firebase;
+                const q = collection(db, `artifacts/${appId}/public/data/generatedContent/${contentId}/quizResponses`);
+                onSnapshot(q, (snapshot) => {
+                    studentRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    studentRecords.sort((a, b) => (b.submittedAt?.toDate() || 0) - (a.submittedAt?.toDate() || 0));
+                    loadingRecords = false;
+                    renderApp(); // Re-render to show updated records
+                }, (error) => {
+                    console.error("Error fetching student records:", error);
+                    showMessage(`載入學生紀錄時發生錯誤: ${error.message}`);
+                    loadingRecords = false;
+                    renderApp(); // Re-render to show error message
+                });
+            };
+
+            return { html: renderRecords(), setup: setupRecordsListener };
+        };
+
+        const QrCodeCanvas = (value, size) => {
+            const canvasId = `qrcode-canvas-${generateUniqueId()}`;
+            setTimeout(() => {
+                const container = document.getElementById(canvasId);
+                if (container && typeof QRCode !== 'undefined') {
+                    new QRCode(container, {
+                        text: value,
+                        width: size,
+                        height: size,
+                        colorDark : "#000000",
+                        colorLight : "#ffffff",
+                        correctLevel : QRCode.CorrectLevel.H
+                    });
+                }
+            }, 0); // Defer to ensure the container is in the DOM
+            return `<div id="${canvasId}" class="flex justify-center"></div>`;
+        };
+
+        let generatedContent = null;
+        let selectedFeature = '';
+        let inputText = '';
+        let urlInput = '';
+        let selectedGrade = '';
+        let selectedSubject = '';
+        let selectedDifficulty = '';
+        let loading = false;
+        let qrCodeData = '';
+        let qrCodeTitle = '';
+        let showQrCodeModal = false;
+        
+        const renderTeacherApp = () => {
+            let generatedContentHtml = '';
+            let studentPreviewButtonHtml = '';
+            
+            const teacherViewHtml = `
+                <div class="min-h-screen bg-gray-100 p-4 sm:p-6 lg:p-8 font-sans">
+                    <h1 class="text-4xl font-extrabold text-center text-gray-900 mb-8">教師教學輔助工具</h1>
+                    <p class="text-center text-sm text-gray-600 mb-4">您的用戶ID: <span class="font-mono text-blue-700">${userId || '載入中...'}</span></p>
+                    <div class="bg-white p-6 rounded-lg shadow-xl mb-8">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">輸入內容</h2>
+                        <div class="mb-4">
+                            <label for="urlInput" class="block text-gray-700 text-sm font-bold mb-2">網頁/影片連結 (目前僅支援手動複製內容):</label>
+                            <div class="flex space-x-2">
+                                <input type="text" id="urlInput" class="flex-grow p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500" placeholder="貼上網頁或影片連結" value="${urlInput}">
+                                <button id="fetch-url" class="px-6 py-3 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 transition duration-300 ease-in-out transform hover:scale-105">
+                                    讀取內容
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <label for="inputText" class="block text-gray-700 text-sm font-bold mb-2">或手動輸入/貼上內容:</label>
+                            <textarea id="inputText" class="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 h-40 resize-y" placeholder="請在此處輸入或貼上網頁/影片的文字內容...">${inputText}</textarea>
+                        </div>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4 mt-6">選擇生成選項</h2>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+                            <div>
+                                <label for="grade" class="block text-gray-700 text-sm font-bold mb-2">年級:</label>
+                                <select id="grade" class="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="" ${selectedGrade === '' ? 'selected' : ''}>選擇年級</option>
+                                    <option value="小學" ${selectedGrade === '小學' ? 'selected' : ''}>小學</option>
+                                    <option value="國中" ${selectedGrade === '國中' ? 'selected' : ''}>國中</option>
+                                    <option value="高中" ${selectedGrade === '高中' ? 'selected' : ''}>高中</option>
+                                    <option value="大學" ${selectedGrade === '大學' ? 'selected' : ''}>大學</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="subject" class="block text-gray-700 text-sm font-bold mb-2">領域:</label>
+                                <select id="subject" class="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="" ${selectedSubject === '' ? 'selected' : ''}>選擇領域</option>
+                                    <option value="語文" ${selectedSubject === '語文' ? 'selected' : ''}>語文</option>
+                                    <option value="數學" ${selectedSubject === '數學' ? 'selected' : ''}>數學</option>
+                                    <option value="自然科學" ${selectedSubject === '自然科學' ? 'selected' : ''}>自然科學</option>
+                                    <option value="社會" ${selectedSubject === '社會' ? 'selected' : ''}>社會</option>
+                                    <option value="藝術" ${selectedSubject === '藝術' ? 'selected' : ''}>藝術</option>
+                                    <option value="健康與體育" ${selectedSubject === '健康與體育' ? 'selected' : ''}>健康與體育</option>
+                                    <option value="綜合活動" ${selectedSubject === '綜合活動' ? 'selected' : ''}>綜合活動</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="difficulty" class="block text-gray-700 text-sm font-bold mb-2">難易度:</label>
+                                <select id="difficulty" class="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="" ${selectedDifficulty === '' ? 'selected' : ''}>選擇難易度</option>
+                                    <option value="簡單" ${selectedDifficulty === '簡單' ? 'selected' : ''}>簡單</option>
+                                    <option value="中等" ${selectedDifficulty === '中等' ? 'selected' : ''}>中等</option>
+                                    <option value="困難" ${selectedDifficulty === '困難' ? 'selected' : ''}>困難</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-6">
+                            <label for="feature" class="block text-gray-700 text-sm font-bold mb-2">要生成的資料類型:</label>
+                            <select id="feature" class="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                                <option value="" ${selectedFeature === '' ? 'selected' : ''}>選擇類型</option>
+                                <option value="lessonPlan" ${selectedFeature === 'lessonPlan' ? 'selected' : ''}>課程教學教案教學計劃</option>
+                                <option value="pptOutline" ${selectedFeature === 'pptOutline' ? 'selected' : ''}>PPT簡報內容與大綱</option>
+                                <option value="contentSummary" ${selectedFeature === 'contentSummary' ? 'selected' : ''}>內容摘要</option>
+                                <option value="keyTerms" ${selectedFeature === 'keyTerms' ? 'selected' : ''}>關鍵字詞解釋</option>
+                                <option value="discussionQuestions" ${selectedFeature === 'discussionQuestions' ? 'selected' : ''}>延伸討論問題</option>
+                                <option value="flashcards" ${selectedFeature === 'flashcards' ? 'selected' : ''}>Flash字卡 (中英文對照)</option>
+                                <option value="quizBoolean" ${selectedFeature === 'quizBoolean' ? 'selected' : ''}>測驗 (是非題)</option>
+                                <option value="quizMultipleChoice" ${selectedFeature === 'quizMultipleChoice' ? 'selected' : ''}>測驗 (單選題)</option>
+                                <option value="quizText" ${selectedFeature === 'quizText' ? 'selected' : ''}>測驗 (問答題)</option>
+                            </select>
+                        </div>
+                        <button id="generate-content" class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-300 ease-in-out transform hover:scale-105" ${loading || !isAuthReady ? 'disabled' : ''}>
+                            ${loading ? '生成中...' : '生成教學內容'}
+                        </button>
+                    </div>
+                    ${loading ? `
+                        <div class="text-center text-blue-600 text-xl font-semibold mt-8">
+                            <div class="custom-loader inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mr-3"></div>
+                            正在生成內容，請稍候...
+                        </div>
+                    ` : ''}
+                    ${generatedContent ? `
+                        <div class="mt-8">
+                            <h2 class="text-3xl font-bold text-gray-800 mb-6 text-center">生成結果</h2>
+                            ${renderGeneratedContentHtml(generatedContent)}
+                            ${(generatedContent.type === 'flashcards' || generatedContent.type.startsWith('quiz')) ? `
+                                <div class="flex justify-center mt-6">
+                                    <button id="preview-student-activity" class="px-8 py-4 bg-orange-500 text-white font-bold rounded-lg shadow-lg hover:bg-orange-600 transition duration-300 ease-in-out transform hover:scale-105">
+                                        預覽學生活動 (新分頁)
+                                    </button>
+                                </div>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            return teacherViewHtml;
+        };
+
+        const renderStudentApp = (contentId, initialStudentName) => {
+            let studentName = initialStudentName || '';
+            let hasEnteredName = studentName !== '';
+            let content = null;
+            let loadingContent = true;
+
+            const renderNameInput = () => `
+                <div class="bg-white p-6 rounded-lg shadow-xl mb-8 text-center">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">請輸入您的姓名</h2>
+                    <p class="text-gray-600 mb-4">請輸入您的姓名以開始活動或測驗。</p>
+                    <div class="mb-4">
+                        <input type="text" id="studentNameInput" class="w-full p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500" placeholder="請在此輸入您的姓名" value="${studentName}">
+                    </div>
+                    <button id="submit-name" class="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 transition duration-300 ease-in-out transform hover:scale-105">
+                        確認並進入活動
+                    </button>
+                </div>
+            `;
+            
+            const renderContentDisplay = () => {
+                if (loadingContent) {
+                    return `
+                        <div class="text-center text-blue-600 text-xl font-semibold mt-8">
+                            <div class="custom-loader inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mr-3"></div>
+                            正在載入內容，請稍候...
+                        </div>
+                    `;
+                }
+
+                if (!content) {
+                    return `
+                        <div class="text-center text-red-600 text-xl font-semibold mt-8">
+                            找不到指定的教學內容。請確認連結是否正確。
+                        </div>
+                    `;
+                }
+                
+                const contentHtml = renderGeneratedContentHtml(content, true, studentName);
+                
+                return `
+                    <div class="bg-white p-6 rounded-lg shadow-xl mb-8">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">您的資訊</h2>
+                        <p class="text-gray-700">姓名: <span class="font-semibold">${studentName}</span></p>
+                        <p class="text-gray-700">活動ID: <span class="font-mono text-blue-700">${contentId}</span></p>
+                    </div>
+                    <div class="mt-8">
+                        <h2 class="text-3xl font-bold text-gray-800 mb-6 text-center">教學內容</h2>
+                        ${contentHtml}
+                    </div>
+                `;
+            };
+
+            const fullHtml = `
+                <div class="min-h-screen bg-gray-100 p-4 sm:p-6 lg:p-8 font-sans">
+                    <h1 class="text-4xl font-extrabold text-center text-gray-900 mb-8">學生學習工具</h1>
+                    <p class="text-center text-sm text-gray-600 mb-4">您的用戶ID: <span class="font-mono text-blue-700">${userId || '載入中...'}</span></p>
+                    ${!hasEnteredName ? renderNameInput() : renderContentDisplay()}
+                </div>
+            `;
+
+            const setupStudentEvents = () => {
+                const nameInput = document.getElementById('studentNameInput');
+                if (nameInput) {
+                    nameInput.addEventListener('input', (e) => {
+                        studentName = e.target.value;
+                    });
+                }
+                const submitNameButton = document.getElementById('submit-name');
+                if (submitNameButton) {
+                    submitNameButton.addEventListener('click', async () => {
+                        if (studentName.trim() === '') {
+                            showMessage('請輸入您的姓名。');
+                            return;
+                        }
+                        hasEnteredName = true;
+                        await loadContentForStudent();
+                        renderApp();
+                    });
+                }
+            };
+
+            const loadContentForStudent = async () => {
+                if (!db || !contentId || !isAuthReady) return;
+                loadingContent = true;
+                const { doc, onSnapshot } = window.Firebase;
+                const docRef = doc(db, `artifacts/${appId}/public/data/generatedContent`, contentId);
+                onSnapshot(docRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        content = { id: docSnap.id, ...docSnap.data() };
+                        showMessage('內容已載入。');
+                    } else {
+                        showMessage('找不到此內容。');
+                        content = null;
+                    }
+                    loadingContent = false;
+                    renderApp(); // Re-render to show content or error
+                }, (error) => {
+                    console.error("Error fetching content:", error);
+                    showMessage(`載入內容時發生錯誤: ${error.message}`);
+                    content = null;
+                    loadingContent = false;
+                    renderApp();
+                });
+            };
+
+            return { html: fullHtml, setup: setupStudentEvents };
+        };
+
+        const renderGeneratedContentHtml = (content, isStudentView = false, studentName = '') => {
+            if (!content) return '';
+            
+            switch (content.type) {
+                case 'lessonPlan': return LessonPlanDisplay(content.data);
+                case 'pptOutline': return PPTOutlineDisplay(content.data);
+                case 'contentSummary': return ContentSummaryDisplay(content.data);
+                case 'keyTerms': return KeyTermsDisplay(content.data);
+                case 'discussionQuestions': return DiscussionQuestionsDisplay(content.data);
+                case 'flashcards': {
+                    const { html, setup } = FlashcardDisplay(content.data, isStudentView, studentName, content.id);
+                    setTimeout(setup, 0); // Defer event setup
+                    return html;
+                }
+                case 'quizBoolean':
+                case 'quizMultipleChoice':
+                case 'quizText': {
+                    const { html, setup } = QuizDisplay(content.data, content.id, isStudentView, studentName, content.id, showMessage);
+                    setTimeout(setup, 0); // Defer event setup
+                    const teacherHtml = isStudentView ? '' : TeacherView(content.id, showMessage).html;
+                    setTimeout(TeacherView(content.id, showMessage).setup, 0);
+                    return html + teacherHtml;
+                }
+                default: return `<div class="p-6 bg-white rounded-lg shadow-md mb-6 text-gray-700">無法顯示此類型內容。</div>`;
+            }
+        };
+
+        const setupTeacherEvents = () => {
+            const root = document.getElementById('app-root');
+            if (!root) return;
+
+            const inputElements = {
+                url: document.getElementById('urlInput'),
+                text: document.getElementById('inputText'),
+                grade: document.getElementById('grade'),
+                subject: document.getElementById('subject'),
+                difficulty: document.getElementById('difficulty'),
+                feature: document.getElementById('feature')
+            };
+
+            for (const key in inputElements) {
+                if (inputElements[key]) {
+                    inputElements[key].addEventListener('input', (e) => {
+                        const value = e.target.value;
+                        switch(key) {
+                            case 'url': urlInput = value; break;
+                            case 'text': inputText = value; break;
+                            case 'grade': selectedGrade = value; break;
+                            case 'subject': selectedSubject = value; break;
+                            case 'difficulty': selectedDifficulty = value; break;
+                            case 'feature': selectedFeature = value; break;
+                        }
+                    });
+                }
+            }
+
+            const fetchUrlButton = document.getElementById('fetch-url');
+            if (fetchUrlButton) {
+                fetchUrlButton.addEventListener('click', () => {
+                    showMessage('由於瀏覽器安全限制，無法直接從網頁連結自動抓取內容。請手動複製網頁或影片的文字內容，並貼到下方的「輸入內容」文字框中。');
+                });
+            }
+
+            const generateButton = document.getElementById('generate-content');
+            if (generateButton) {
+                generateButton.addEventListener('click', handleGenerateContent);
+            }
+
+            const previewButton = document.getElementById('preview-student-activity');
+            if (previewButton) {
+                previewButton.addEventListener('click', () => {
+                    if (generatedContent && (generatedContent.type === 'flashcards' || generatedContent.type.startsWith('quiz'))) {
+                        const previewUrl = `${getArtifactBaseUrl()}?student=true&contentId=${generatedContent.id}`;
+                        window.open(previewUrl, '_blank');
+                    } else {
+                        showMessage('此內容類型無法預覽學生活動。');
+                    }
+                });
+            }
+        };
+        
+        const handleGenerateContent = async () => {
+            if (!inputText.trim()) {
+                showMessage('請先讀取網頁內容或手動輸入文字。');
+                return;
+            }
+            if (!selectedFeature) {
+                showMessage('請選擇要生成的資料類型。');
+                return;
+            }
+            if (!isAuthReady || !db || !auth || !userId) {
+                showMessage('Firebase 尚未初始化或認證。請稍候再試。');
+                return;
+            }
+
+            loading = true;
+            generatedContent = null;
+            qrCodeData = '';
+            showQrCodeModal = false;
+            renderApp(); // Re-render to show loading state
+
+            let prompt = `根據以下內容：\n\n${inputText}\n\n`;
+            let responseSchema = null;
+            let responseMimeType = "text/plain";
+            let contentId = generateUniqueId();
+            let collectionPath = `artifacts/${appId}/public/data/generatedContent`;
+            let contentType = selectedFeature;
+
+            if (selectedGrade) { prompt += `年級: ${selectedGrade}年級。\n`; }
+            if (selectedSubject) { prompt += `領域: ${selectedSubject}。\n`; }
+            if (selectedDifficulty) { prompt += `難易度: ${selectedDifficulty}。\n`; }
+
+            try {
+                switch (selectedFeature) {
+                    case 'lessonPlan': prompt += '請生成一個詳細的課程教學教案教學計劃，包含目標、材料、步驟、評估。'; break;
+                    case 'pptOutline': prompt += '請生成一個詳細的PPT簡報內容與大綱，包含各投影片的標題和重點。'; break;
+                    case 'quizBoolean':
+                    case 'quizMultipleChoice':
+                    case 'quizText':
+                        prompt += selectedFeature === 'quizBoolean' ? `請根據內容生成3到5題的是非題測驗。每題都要有題目和正確答案（true/false）。格式應為JSON陣列，每個物件包含'type' (boolean), 'question', 'answer'。` :
+                                  selectedFeature === 'quizMultipleChoice' ? `請根據內容生成3到5題的單選題測驗。每題都要有題目、至少3個選項和正確答案。格式應為JSON陣列，每個物件包含'type' (multiple_choice), 'question', 'options' (陣列), 'answer'。` :
+                                  `請根據內容生成3到5題的問答題測驗。每題都要有題目和正確答案。格式應為JSON陣列，每個物件包含'type' (text), 'question', 'answer'。`;
+                        responseSchema = {
+                            type: "ARRAY", items: { type: "OBJECT", properties: { "type": { "type": "STRING" }, "question": { "type": "STRING" }, ...(selectedFeature === 'quizMultipleChoice' && { "options": { "type": "ARRAY", "items": { "type": "STRING" } } }), "answer": { "type": "STRING" } }, required: ["type", "question", "answer"] }
+                        };
+                        responseMimeType = "application/json";
+                        break;
+                    case 'flashcards':
+                        prompt += `請根據內容生成3到10個中英文對照的flash字卡。格式應為JSON陣列，每個物件包含'chinese'和'english'。`;
+                        responseSchema = { type: "ARRAY", items: { type: "OBJECT", properties: { "chinese": { "type": "STRING" }, "english": { "type": "STRING" } }, required: ["chinese", "english"] } };
+                        responseMimeType = "application/json";
+                        break;
+                    case 'contentSummary': prompt += '請將以下內容總結成200字以內的摘要。'; break;
+                    case 'keyTerms':
+                        prompt += `請從以下內容中提取5到10個關鍵詞彙，並為每個詞彙提供簡潔的解釋。格式應為JSON陣列，每個物件包含'term'和'definition'。`;
+                        responseSchema = { type: "ARRAY", items: { type: "OBJECT", properties: { "term": { "type": "STRING" }, "definition": { "type": "STRING" } }, required: ["term", "definition"] } };
+                        responseMimeType = "application/json";
+                        break;
+                    case 'discussionQuestions': prompt += '請根據內容生成3到5個延伸討論問題。'; break;
+                    default: showMessage('請選擇有效的資料類型。'); loading = false; renderApp(); return;
+                }
+
+                const chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+                const payload = { contents: chatHistory, generationConfig: { responseMimeType: responseMimeType, ...(responseSchema && { responseSchema: responseSchema }) } };
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 && result.candidates[0].content && result.candidates[0].content.parts && result.candidates[0].content.parts.length > 0) {
+                    let generatedText = result.candidates[0].content.parts[0].text;
+                    let parsedContent = generatedText;
+                    if (responseMimeType === "application/json") {
+                        try { parsedContent = JSON.parse(generatedText); } catch (jsonError) { console.error("Failed to parse JSON:", jsonError); showMessage(`生成內容格式錯誤，請重試。`); loading = false; renderApp(); return; }
+                    }
+                    
+                    generatedContent = {
+                        id: contentId, type: contentType, data: parsedContent, originalInput: inputText,
+                        grade: selectedGrade, subject: selectedSubject, difficulty: selectedDifficulty,
+                        generatedAt: new Date().toISOString(), generatedBy: userId
+                    };
+                    
+                    const { doc, setDoc } = window.Firebase;
+                    const docRef = doc(db, collectionPath, contentId);
+                    await setDoc(docRef, generatedContent);
+                    showMessage('內容已成功生成並儲存！');
+
+                    const shareableUrl = `${getArtifactBaseUrl()}?student=true&contentId=${contentId}`;
+                    qrCodeData = shareableUrl;
+                    qrCodeTitle = `分享此${selectedFeature === 'flashcards' ? '字卡' : selectedFeature.startsWith('quiz') ? '測驗' : '內容'}給學生`;
+                    showQrCodeModal = true;
+                } else {
+                    showMessage('未能生成內容，請重試。');
+                    console.error("Unexpected API response structure:", result);
+                }
+            } catch (error) {
+                console.error("生成內容時發生錯誤:", error);
+                showMessage(`生成內容時發生錯誤: ${error.message}`);
+            } finally {
+                loading = false;
+                renderApp();
+            }
+        };
+
+        const renderQrCodeModal = () => {
+            const qrCodeModalHtml = `
+                <div class="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50" id="qr-code-modal">
+                    <div class="bg-white p-8 rounded-lg shadow-xl max-w-md w-full text-center">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">${qrCodeTitle}</h2>
+                        <div class="mb-6">
+                            ${QrCodeCanvas(qrCodeData, 256)}
+                        </div>
+                        <p class="text-gray-700 text-sm mb-4 break-all">
+                            分享此連結給學生: <a href="${qrCodeData}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">${qrCodeData}</a>
+                            <br/>
+                            <span class="text-red-600 font-bold mt-2 block">
+                                重要提示: 如果此連結無法運作，請從瀏覽器地址欄複製根 URL，並將 "?student=true&contentId=${generatedContent.id}" 手動附加到該根 URL 後面。
+                            </span>
+                        </p>
+                        <button onclick="copyToClipboard('${qrCodeData}')" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition duration-300 mb-4">
+                            複製連結
+                        </button>
+                        <button onclick="document.getElementById('qr-code-modal').remove();" class="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition duration-300 ml-2">
+                            關閉
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', qrCodeModalHtml);
+        };
+
+        const copyToClipboard = (text) => {
+            const tempInput = document.createElement('textarea');
+            tempInput.value = text;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            showMessage('連結已複製到剪貼簿！');
+        };
+
+        const renderApp = () => {
+            const root = document.getElementById('app-root');
+            if (!root) return;
+
+            const params = new URLSearchParams(window.location.search);
+            const isStudentView = params.get('student') === 'true';
+            const contentId = params.get('contentId');
+            const studentName = params.get('studentName');
+
+            if (isStudentView && contentId) {
+                const { html, setup } = renderStudentApp(contentId, studentName);
+                root.innerHTML = html;
+                setup();
+            } else {
+                root.innerHTML = renderTeacherApp();
+                setupTeacherEvents();
+            }
+            if (showQrCodeModal) {
+                renderQrCodeModal();
+            }
+        };
+
+        // Initialize Firebase and then render the app
+        window.onload = async () => {
+            await initializeFirebase();
+            renderApp();
+        };
+
+    </script>
+</body>
+</html>
