@@ -1,82 +1,111 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>AI 教學素材產生器</title>
-    <style>
-        body { font-family: sans-serif; margin: 2rem; background: #f7f7f7; }
-        h1 { color: #333; }
-        label { display: block; margin-top: 1rem; font-weight: bold; }
-        textarea, input, select { width: 100%; padding: 0.5rem; margin-top: 0.25rem; }
-        button { margin-top: 2rem; padding: 1rem; background: #007bff; color: #fff; border: none; cursor: pointer; }
-        button:hover { background: #0056b3; }
-        .output { white-space: pre-wrap; background: #fff; padding: 1rem; border: 1px solid #ccc; margin-top: 2rem; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI 教學素材產生器（Prompt 組合工具）</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem; background: #f2f2f2; line-height: 1.6; }
+    h1 { color: #222; }
+    label { font-weight: bold; margin-top: 1rem; display: block; }
+    input, select, textarea { width: 100%; padding: 0.6rem; margin-top: 0.25rem; border: 1px solid #ccc; border-radius: 4px; }
+    input[type="file"] { padding: 0.3rem; }
+    .checkbox-group label { font-weight: normal; display: block; margin-top: 0.3rem; }
+    .btn { background-color: #007bff; color: white; padding: 0.75rem; border: none; margin-top: 1.5rem; cursor: pointer; width: 100%; font-size: 1rem; border-radius: 4px; }
+    .btn:hover { background-color: #0056b3; }
+    .output { background: white; padding: 1rem; margin-top: 2rem; white-space: pre-wrap; border: 1px solid #ccc; border-radius: 4px; }
+  </style>
 </head>
 <body>
-    <h1>AI 教學素材產生器（Prompt 組合工具）</h1>
+  <h1>AI 教學素材產生器（Prompt 組合工具）</h1>
 
-    <label for="links">請貼上 YouTube 或網頁連結（可多行）：</label>
-    <textarea id="links" rows="4" placeholder="https://youtube.com/..."></textarea>
+  <label for="links">請貼上 YouTube 或網頁連結（可多行）：</label>
+  <textarea id="links" rows="4" placeholder="https://youtube.com/..."></textarea>
 
-    <label for="uploads">上傳 PDF、文字或圖片檔案：</label>
-    <input id="uploads" type="file" multiple />
+  <label for="uploads">上傳 PDF、文字或圖片檔案：</label>
+  <input type="file" id="uploads" multiple />
+  <div id="fileList"></div>
 
-    <label for="grade">選擇年級：</label>
-    <select id="grade">
-        <option value="">請選擇</option>
-        ${[...Array(12).keys()].map(i => `<option value="${i+1}">${i+1}年級</option>`).join('')}
-    </select>
+  <label for="grade">選擇年級：</label>
+  <select id="grade">
+    <option value="">請選擇</option>
+    <option value="1年級">1年級</option>
+    <option value="2年級">2年級</option>
+    <option value="3年級">3年級</option>
+    <option value="4年級">4年級</option>
+    <option value="5年級">5年級</option>
+    <option value="6年級">6年級</option>
+    <option value="7年級">7年級</option>
+    <option value="8年級">8年級</option>
+    <option value="9年級">9年級</option>
+    <option value="10年級">10年級</option>
+    <option value="11年級">11年級</option>
+    <option value="12年級">12年級</option>
+  </select>
 
-    <label for="subject">選擇科目：</label>
-    <select id="subject">
-        <option value="">請選擇</option>
-        <option value="語文">語文</option>
-        <option value="數學">數學</option>
-        <option value="自然">自然</option>
-        <option value="社會">社會</option>
-        <option value="藝術">藝術</option>
-    </select>
+  <label for="subject">選擇科目：</label>
+  <select id="subject">
+    <option value="">請選擇</option>
+    <option value="語文">語文</option>
+    <option value="數學">數學</option>
+    <option value="自然">自然</option>
+    <option value="社會">社會</option>
+    <option value="藝術">藝術</option>
+    <option value="健康與體育">健康與體育</option>
+    <option value="綜合活動">綜合活動</option>
+  </select>
 
-    <label for="level">選擇難度：</label>
-    <select id="level">
-        <option value="">請選擇</option>
-        <option value="簡單">簡單</option>
-        <option value="中等">中等</option>
-        <option value="困難">困難</option>
-    </select>
+  <label for="level">選擇難度：</label>
+  <select id="level">
+    <option value="">請選擇</option>
+    <option value="簡單">簡單</option>
+    <option value="中等">中等</option>
+    <option value="困難">困難</option>
+  </select>
 
-    <label>選擇要產出的內容（可複選）：</label>
-    <div>
-        ${['教學計劃', '教學PPT', '教學圖片', '單選題', '是非題', '簡答題', '內容摘要', '關鍵字詞解釋', '延伸討論問題', '字卡配對'].map((text, i) => `
-            <label><input type="checkbox" value="${text}" class="task-checkbox"/> ${text}</label>
-        `).join('')}
-    </div>
+  <label>選擇要產出的內容（可複選）：</label>
+  <div class="checkbox-group">
+    <label><input type="checkbox" class="task" value="教學計劃"> 教學計劃</label>
+    <label><input type="checkbox" class="task" value="教學PPT"> 教學PPT</label>
+    <label><input type="checkbox" class="task" value="教學圖片"> 教學圖片</label>
+    <label><input type="checkbox" class="task" value="單選題"> 單選題</label>
+    <label><input type="checkbox" class="task" value="是非題"> 是非題</label>
+    <label><input type="checkbox" class="task" value="簡答題"> 簡答題</label>
+    <label><input type="checkbox" class="task" value="內容摘要"> 內容摘要</label>
+    <label><input type="checkbox" class="task" value="關鍵字詞解釋"> 關鍵字詞解釋</label>
+    <label><input type="checkbox" class="task" value="延伸討論問題"> 延伸討論問題</label>
+    <label><input type="checkbox" class="task" value="字卡配對"> 字卡配對活動</label>
+  </div>
 
-    <button onclick="generatePrompt()">產生提示詞</button>
+  <button class="btn" onclick="generatePrompt()">產生提示詞</button>
 
-    <div class="output" id="output"></div>
+  <div id="output" class="output"></div>
 
-    <script>
-        function generatePrompt() {
-            const links = document.getElementById('links').value.trim().split('\n').filter(x => x);
-            const grade = document.getElementById('grade').value;
-            const subject = document.getElementById('subject').value;
-            const level = document.getElementById('level').value;
-            const tasks = [...document.querySelectorAll('.task-checkbox:checked')].map(cb => cb.value);
+  <script>
+    document.getElementById('uploads').addEventListener('change', function() {
+      const fileList = document.getElementById('fileList');
+      fileList.innerHTML = Array.from(this.files).map(f => '✔️ ' + f.name).join('<br>');
+    });
 
-            let prompt = '請根據以下條件產出教學素材：\n';
-            if (links.length) prompt += `1. 來源連結：${links.join(', ')}\n`;
-            prompt += `2. 年級：${grade || '未指定'}\n`;
-            prompt += `3. 科目：${subject || '未指定'}\n`;
-            prompt += `4. 難度：${level || '未指定'}\n`;
-            prompt += `5. 要產出的項目：${tasks.join(', ')}\n`;
+    function generatePrompt() {
+      const links = document.getElementById('links').value.trim().split('\n').filter(x => x);
+      const grade = document.getElementById('grade').value;
+      const subject = document.getElementById('subject').value;
+      const level = document.getElementById('level').value;
+      const tasks = [...document.querySelectorAll('.task:checked')].map(cb => cb.value);
+      const files = [...document.getElementById('uploads').files].map(f => f.name);
 
-            prompt += '\n請用條列方式完整生成對應教學素材，方便學生理解與互動。';
+      let prompt = "你是一位專業教學 AI 協助工具，請根據以下條件產出對應內容：\n\n";
+      if (links.length) prompt += `1. 來源連結：${links.join(', ')}\n`;
+      if (files.length) prompt += `2. 上傳檔案：${files.join(', ')}\n`;
+      prompt += `3. 年級：${grade || '未指定'}\n`;
+      prompt += `4. 科目：${subject || '未指定'}\n`;
+      prompt += `5. 難度：${level || '未指定'}\n`;
+      prompt += `6. 要產出的內容：${tasks.join(', ')}\n\n`;
+      prompt += "請依據上述所有資料，條列並清楚產出所需教案、內容、或互動活動素材，回應格式需清楚適合教師直接使用。";
 
-            document.getElementById('output').innerText = prompt;
-        }
-    </script>
+      document.getElementById('output').innerText = prompt;
+    }
+  </script>
 </body>
 </html>
